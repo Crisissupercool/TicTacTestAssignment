@@ -1,0 +1,7 @@
+name: Laminas Continuous Integration
+  # You may pin to the exact commit or the version.
+  # uses: laminas/laminas-continuous-integration-action@da5fe7b295eeb94e8126314e6abfd6246657a7d4
+  uses: laminas/laminas-continuous-integration-action@v0
+  with:
+    # JSON string representing the job to run
+    job: 
