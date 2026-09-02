@@ -47,7 +47,7 @@ dass beide Frameworks korrekt eingebunden sind – es wird kein Produktivcode ge
 
 Alle Tests befinden sich in
 [`TicTacToeMainTest.java`](src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java).
-`E` steht in den Board-Arrays für ein leeres Feld (`null`).
+Die Boards werden über die Helper-Klasse `BoardFixtures` gebaut; dort steht `E` für ein leeres Feld (`null`).
 
 Das GIVEN_WHEN_THEN-Pattern ist dreifach umgesetzt:
 
@@ -65,13 +65,37 @@ Das Spielfeld ist als eindimensionales Array der Länge 9 organisiert:
  6 | 7 | 8
 ```
 
+### Helper und Fixtures
+
+Die Tests bauen ihre Boards nicht mehr von Hand, sondern über die Helper-Klasse
+[`BoardFixtures.java`](src/test/java/ch/bbw/m450/tictactoe/BoardFixtures.java):
+
+| Helper | Zweck |
+| --- | --- |
+| `emptyBoard()` | leeres Board der Länge 9 |
+| `boardOf(Stone...)` | Board aus genau 9 Feldern (prüft die Länge) |
+| `place(board, color, positions...)` | Kopie des Boards mit gesetzten Steinen – das Original bleibt unverändert |
+| `middleRowOfCrosses()` | benanntes Fixture-Board für Test 1 |
+| `antiDiagonalOfCircles()` | benanntes Fixture-Board für Test 2 |
+| `mixedTopRow()` | benanntes Fixture-Board für Test 3 |
+| `assertNobodyWins(board)` | Assertion-Helper: prüft `isWin` für beide Farben und meldet im Fehlerfall das Board |
+
+Dazu kommen die JUnit-Fixtures in
+[`TicTacToeMainTest.java`](src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java):
+
+* `@BeforeEach setUp()` erzeugt vor **jedem** Test zwei frische `GreedyPlayer`-Instanzen
+  (`xPlayer`, `oPlayer`) und leitet `System.out` in einen `ByteArrayOutputStream` um.
+  So bleiben die Tests unabhängig voneinander und die Spielausgabe verschmutzt den
+  Test-Report nicht – sie kann stattdessen mitgeprüft werden.
+* `@AfterEach tearDown()` stellt den ursprünglichen `System.out` wieder her (Teardown).
+
 ---
 
 ### Test 1 – `GIVEN_middleRowOfCrosses_WHEN_isWinForCross_THEN_returnsTrue`
 
 | | |
 | --- | --- |
-| **GIVEN** | ein Board, auf dem CROSS die komplette mittlere Reihe (Felder 3, 4, 5) besetzt: `{CIRCLE, CIRCLE, E, CROSS, CROSS, CROSS, E, E, E}` |
+| **GIVEN** | ein Board, auf dem CROSS die komplette mittlere Reihe (Felder 3, 4, 5) besetzt – aufgebaut vom Helper `BoardFixtures.middleRowOfCrosses()` |
 | **WHEN** | `TicTacToeMain.isWin(board, CROSS)` aufgerufen wird |
 | **THEN** | ist das Resultat `true` – die Reihe wird als Sieg erkannt |
 
@@ -83,7 +107,7 @@ Das Spielfeld ist als eindimensionales Array der Länge 9 organisiert:
 
 | | |
 | --- | --- |
-| **GIVEN** | ein Board, auf dem CIRCLE die Felder 2, 4 und 6 besetzt: `{CROSS, CROSS, CIRCLE, E, CIRCLE, E, CIRCLE, E, E}` |
+| **GIVEN** | ein Board, auf dem CIRCLE die Felder 2, 4 und 6 besetzt – aufgebaut vom Helper `BoardFixtures.antiDiagonalOfCircles()` |
 | **WHEN** | `TicTacToeMain.isWin(board, CIRCLE)` aufgerufen wird |
 | **THEN** | ist das Resultat `true` – auch die Diagonale wird als Sieg erkannt |
 
@@ -95,8 +119,8 @@ Das Spielfeld ist als eindimensionales Array der Länge 9 organisiert:
 
 | | |
 | --- | --- |
-| **GIVEN** | ein Board mit gemischter oberer Reihe `{CROSS, CIRCLE, CROSS, E, E, E, E, E, E}` sowie ein komplett leeres Board |
-| **WHEN** | `isWin` für beide Boards und beide Farben aufgerufen wird |
+| **GIVEN** | ein Board mit gemischter oberer Reihe (`BoardFixtures.mixedTopRow()`) sowie ein komplett leeres Board (`BoardFixtures.emptyBoard()`) |
+| **WHEN** | der Assertion-Helper `assertNobodyWins(board)` für beide Boards `isWin` mit beiden Farben aufruft |
 | **THEN** | liefern alle vier Aufrufe `false` |
 
 **Getestete Anforderung:** Negativfall – `isWin` meldet keinen Sieg, wenn keiner vorliegt.
@@ -108,8 +132,8 @@ Insbesondere darf ein leeres Board (lauter `null`) nicht fälschlicherweise als 
 
 | | |
 | --- | --- |
-| **GIVEN** | eine einzige `GreedyPlayer`-Instanz |
-| **WHEN** | `TicTacToeMain.play(player, player)` mit dieser Instanz für beide Farben aufgerufen wird |
+| **GIVEN** | eine einzige `GreedyPlayer`-Instanz – das Fixture `xPlayer` aus `@BeforeEach` |
+| **WHEN** | `TicTacToeMain.play(xPlayer, xPlayer)` mit dieser Instanz für beide Farben aufgerufen wird |
 | **THEN** | wird eine `IllegalArgumentException` mit der Meldung `"players must differ"` geworfen |
 
 **Getestete Anforderung:** Vorbedingung der Methode `play` – die beiden Spieler müssen verschieden sein.
@@ -120,9 +144,9 @@ Insbesondere darf ein leeres Board (lauter `null`) nicht fälschlicherweise als 
 
 | | |
 | --- | --- |
-| **GIVEN** | zwei verschiedene `GreedyPlayer`-Instanzen, die immer das am weitesten oben-links liegende freie Feld belegen |
+| **GIVEN** | die beiden Fixtures `xPlayer` und `oPlayer` – zwei verschiedene `GreedyPlayer`-Instanzen, die immer das am weitesten oben-links liegende freie Feld belegen |
 | **WHEN** | mit `TicTacToeMain.play(xPlayer, oPlayer)` eine komplette Partie gespielt wird |
-| **THEN** | ist der Rückgabewert `Stone.CROSS` |
+| **THEN** | ist der Rückgabewert `Stone.CROSS`, und die aufgezeichnete Konsolenausgabe enthält `"...and the winner is: CROSS"` |
 
 **Begründung:** Beide Spieler wählen immer das kleinste freie Feld. Der Spielverlauf ist
 deshalb deterministisch: X=0, O=1, X=2, O=3, X=4, O=5, X=6. Nach dem 7. Zug hält CROSS
@@ -140,6 +164,7 @@ Repository: <https://github.com/Crisissupercool/TicTacTestAssignment>
 | Datei | Link |
 | --- | --- |
 | Die 5 TicTacToe-Tests | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java> |
+| Helper / Fixtures | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/BoardFixtures.java> |
 | Dummy-Tests (JUnit + AssertJ) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/DummyTest.java> |
 | Build-Konfiguration | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/build.gradle> |
 
