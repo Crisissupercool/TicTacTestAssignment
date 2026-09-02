@@ -43,9 +43,9 @@ dass beide Frameworks korrekt eingebunden sind – es wird kein Produktivcode ge
 > Dummy-Assertions so formuliert, dass sie erfüllt sind – die Aussage "das Framework läuft"
 > bleibt dieselbe.
 
-## 3. Die 5 Tests nach dem GIVEN-WHEN-THEN-Pattern
+## 3. Die 5 Basis-Tests nach dem GIVEN-WHEN-THEN-Pattern
 
-Alle Tests befinden sich in
+Diese Tests befinden sich in
 [`TicTacToeMainTest.java`](src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java).
 Die Boards werden über die Helper-Klasse `BoardFixtures` gebaut; dort steht `E` für ein leeres Feld (`null`).
 
@@ -157,22 +157,63 @@ Züge, Siegerkennung und Rückgabewert.
 
 ---
 
-## 4. Link zum Test-Code auf GitHub
+## 4. Parameterized Tests
+
+Die vier Tests in
+[`TicTacToeMainTest.java`](src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java)
+prüfen mit je **einem** Testrumpf viele Board-Konstellationen. Der `name`-Parameter von
+`@ParameterizedTest` schreibt das GIVEN_WHEN_THEN-Muster auch für jeden einzelnen Fall
+in den Report.
+
+| Test | Quelle | Fälle | Inhalt |
+| --- | --- | --- | --- |
+| `GIVEN_everyWinningLine_WHEN_isWinIsCalled_THEN_onlyTheOwnerWins` | `@MethodSource("allWinningLines")` | 16 | alle 8 Gewinnlinien (3 Reihen, 3 Spalten, 2 Diagonalen) × beide Farben; geprüft wird zusätzlich, dass der Gegner **nicht** gewinnt |
+| `GIVEN_tableOfBoards_WHEN_isWinIsCalled_THEN_expectedWinnerIsReported` | `@CsvSource` | 12 | Tabelle aus Board + erwartetem Gewinner, inkl. leerem Board, gemischter Reihe, "zwei in einer Reihe" und einem vollen Unentschieden-Board |
+| `GIVEN_onlyTwoStonesPerLine_WHEN_isWinIsCalled_THEN_nobodyWins` | `@EnumSource(Stone.class)` | 2 | für jede Farbe: 4 Steine auf dem Board, aber nie drei in einer Linie |
+| `GIVEN_scriptedGames_WHEN_fullGameIsPlayed_THEN_expectedWinnerIsReturned` | `@MethodSource("scriptedGames")` | 3 | komplette Partien über `play(...)`: Sieg für CROSS, Sieg für CIRCLE und ein Unentschieden (`null`) |
+
+### Board-Notation im `@CsvSource`
+
+Damit die Tabelle lesbar bleibt, werden die Boards als 9-Zeichen-String geschrieben und vom
+Helper `BoardFixtures.parse(...)` eingelesen: `X` = CROSS, `O` = CIRCLE, `-` = freies Feld.
+Der erwartete Gewinner steht als `X`, `O` oder `-` (niemand) in der zweiten Spalte:
+
+```java
+@CsvSource({
+        "XXX------, X", // obere Reihe
+        "--X-X-X--, X", // Gegendiagonale
+        "---------, -", // leeres Board
+        "XOXXOOOXX, -"  // volles Board, niemand hat eine Linie
+})
+```
+
+### Zusätzliche Helper für die Parameterized Tests
+
+| Helper | Zweck |
+| --- | --- |
+| `BoardFixtures.WINNING_LINES` | alle 8 Gewinnlinien als `int[][]` – die Datenquelle für `allWinningLines()` |
+| `BoardFixtures.lineOf(color, line)` | Board, auf dem eine Farbe genau diese Linie besetzt |
+| `BoardFixtures.parse("XOX------")` | Board aus der kompakten Notation |
+| [`ScriptedPlayer`](src/test/java/ch/bbw/m450/tictactoe/ScriptedPlayer.java) | Spieler, der eine fest vorgegebene Zugfolge abspielt – damit lässt sich `play(...)` in eine exakt bekannte Spielsituation steuern |
+
+## 5. Link zum Test-Code auf GitHub
 
 Repository: <https://github.com/Crisissupercool/TicTacTestAssignment>
 
 | Datei | Link |
 | --- | --- |
-| Die 5 TicTacToe-Tests | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java> |
+| TicTacToe-Tests (inkl. Parameterized Tests) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/TicTacToeMainTest.java> |
 | Helper / Fixtures | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/BoardFixtures.java> |
+| Scripted-Player (Helper) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/ScriptedPlayer.java> |
 | Dummy-Tests (JUnit + AssertJ) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/DummyTest.java> |
 | Build-Konfiguration | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/build.gradle> |
 
-## 5. Screenshot: alle Tests erfolgreich
+## 6. Screenshot: alle Tests erfolgreich
 
 ![Alle Tests erfolgreich](docs/screenshot-tests.png)
 
-Erzeugt mit `./gradlew test`. Konsolenausgabe des Laufs:
+Erzeugt mit `./gradlew test`. Konsolenausgabe des Laufs (gekürzt – die 16 Fälle der
+Gewinnlinien und die 12 Fälle der Board-Tabelle sind hier nur je zweimal aufgeführt):
 
 ```
 > Task :compileTestJava
@@ -184,18 +225,37 @@ DummyTest > GIVEN JUnit 5 on the test classpath WHEN plain assertions are evalua
 
 DummyTest > GIVEN AssertJ on the test classpath WHEN fluent assertions are evaluated THEN they hold PASSED
 
-TicTacToeMainTest > GIVEN two greedy players WHEN a full game is played THEN CROSS wins PASSED
-
 TicTacToeMainTest > GIVEN a board with a middle row of crosses WHEN isWin is called for CROSS THEN it returns true PASSED
 
 TicTacToeMainTest > GIVEN a board with circles on the anti-diagonal WHEN isWin is called for CIRCLE THEN it returns true PASSED
 
-TicTacToeMainTest > GIVEN one single player instance WHEN play is started with it for both colours THEN an IllegalArgumentException is thrown PASSED
-
 TicTacToeMainTest > GIVEN a mixed line and an empty board WHEN isWin is called for both colours THEN it returns false PASSED
 
+TicTacToeMainTest > GIVEN one single player instance WHEN play is started with it for both colours THEN an IllegalArgumentException is thrown PASSED
+
+TicTacToeMainTest > GIVEN two greedy players WHEN a full game is played THEN CROSS wins PASSED
+
+TicTacToeMainTest > GIVEN each of the 8 winning lines for each colour WHEN isWin is called THEN only the owner wins > GIVEN CROSS on the line [0, 1, 2] WHEN isWin is called THEN it returns true PASSED
+
+TicTacToeMainTest > GIVEN each of the 8 winning lines for each colour WHEN isWin is called THEN only the owner wins > GIVEN CIRCLE on the line [2, 4, 6] WHEN isWin is called THEN it returns true PASSED
+
+TicTacToeMainTest > GIVEN a table of board constellations WHEN isWin is called THEN the expected winner is reported > GIVEN the board "XXX------" WHEN isWin is called THEN the winner is "X" PASSED
+
+TicTacToeMainTest > GIVEN a table of board constellations WHEN isWin is called THEN the expected winner is reported > GIVEN the board "XOXXOOOXX" WHEN isWin is called THEN the winner is "-" PASSED
+
+TicTacToeMainTest > GIVEN a colour holding only two stones per line WHEN isWin is called THEN nobody wins > GIVEN CROSS with two stones per line WHEN isWin is called THEN it returns false PASSED
+
+TicTacToeMainTest > GIVEN a colour holding only two stones per line WHEN isWin is called THEN nobody wins > GIVEN CIRCLE with two stones per line WHEN isWin is called THEN it returns false PASSED
+
+TicTacToeMainTest > GIVEN scripted game constellations WHEN a full game is played THEN the expected winner is returned > GIVEN CROSS completes the top row WHEN the game is played THEN the winner is CROSS PASSED
+
+TicTacToeMainTest > GIVEN scripted game constellations WHEN a full game is played THEN the expected winner is returned > GIVEN CIRCLE completes the middle row WHEN the game is played THEN the winner is CIRCLE PASSED
+
+TicTacToeMainTest > GIVEN scripted game constellations WHEN a full game is played THEN the expected winner is returned > GIVEN both fill the board without a line WHEN the game is played THEN the winner is null PASSED
+
 BUILD SUCCESSFUL in 2s
-3 actionable tasks: 3 executed
+3 actionable tasks: 2 executed, 1 up-to-date
 ```
 
-**7 Tests, 0 Fehler, 0 übersprungen.**
+**40 Tests, 0 Fehler, 0 übersprungen** – 2 Dummy-Tests, 5 klassische Tests und
+33 Fälle aus den 4 Parameterized Tests (16 + 12 + 2 + 3).

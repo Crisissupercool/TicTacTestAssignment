@@ -59,6 +59,24 @@ final class BoardFixtures {
 		return result;
 	}
 
+	/**
+	 * All 8 lines that win a game: the three rows, the three columns and the two diagonals.
+	 */
+	static final int[][] WINNING_LINES = {
+			{0, 1, 2}, {3, 4, 5}, {6, 7, 8}, // rows
+			{0, 3, 6}, {1, 4, 7}, {2, 5, 8}, // columns
+			{0, 4, 8}, {2, 4, 6}             // diagonals
+	};
+
+	/**
+	 * @param color the color that takes the line
+	 * @param line the positions (0-8) forming the line
+	 * @return an otherwise empty board where the color holds exactly this line
+	 */
+	static Stone[] lineOf(Stone color, int... line) {
+		return place(emptyBoard(), color, line);
+	}
+
 	/** @return a board where CROSS holds the whole middle row (3, 4, 5) */
 	static Stone[] middleRowOfCrosses() {
 		return place(place(emptyBoard(), CIRCLE, 0, 1), CROSS, 3, 4, 5);
@@ -72,6 +90,28 @@ final class BoardFixtures {
 	/** @return a board with a top row filled by both colours, so nobody has a line */
 	static Stone[] mixedTopRow() {
 		return boardOf(CROSS, CIRCLE, CROSS, E, E, E, E, E, E);
+	}
+
+	/**
+	 * Parses a compact board notation, e.g. "XOX--O--X": `X` = CROSS, `O` = CIRCLE, `-` = free.
+	 *
+	 * @param fields exactly 9 characters, top-left to bottom-right
+	 * @return the parsed board
+	 */
+	static Stone[] parse(String fields) {
+		if (fields.length() != TicTacToeMain.BOARD_SIZE) {
+			throw new IllegalArgumentException("a board needs exactly " + TicTacToeMain.BOARD_SIZE + " fields");
+		}
+		var board = emptyBoard();
+		for (var i = 0; i < TicTacToeMain.BOARD_SIZE; i++) {
+			board[i] = switch (fields.charAt(i)) {
+				case 'X' -> CROSS;
+				case 'O' -> CIRCLE;
+				case '-' -> E;
+				default -> throw new IllegalArgumentException("unknown field: " + fields.charAt(i));
+			};
+		}
+		return board;
 	}
 
 	/**
