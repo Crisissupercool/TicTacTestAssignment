@@ -257,5 +257,9 @@ BUILD SUCCESSFUL in 2s
 3 actionable tasks: 2 executed, 1 up-to-date
 ```
 
+
+
+Feedback von Auditor(Sergio Masegosa): Gut struktiert und gute Testfälle, jedoch keine grosse ordnung und falsche einteilung von tests. 5.3
+
 **40 Tests, 0 Fehler, 0 übersprungen** – 2 Dummy-Tests, 5 klassische Tests und
 33 Fälle aus den 4 Parameterized Tests (16 + 12 + 2 + 3).
