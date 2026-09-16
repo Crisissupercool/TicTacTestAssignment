@@ -70,3 +70,11 @@ jobs:
           path: build/reports/tests/test/
           if-no-files-found: warn
           retention-days: 30
+
+       # 3. HTML-Report auf GitHub Pages veröffentlichen (nur auf main/master Branches)
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/refactor/tictactoe-parameterized-tests')
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+            publish_dir: ./build/reports/jacoco/test/html
