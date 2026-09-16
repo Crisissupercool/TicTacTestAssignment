@@ -27,6 +27,7 @@ Tests ausführen:
 ```
 
 Der HTML-Report liegt danach unter `build/reports/tests/test/index.html`.
+Zusätzlich ist das `jacoco`-Plugin eingebunden – siehe Abschnitt 5.
 
 ## 2. Dummy-Tests
 
@@ -196,7 +197,113 @@ Der erwartete Gewinner steht als `X`, `O` oder `-` (niemand) in der zweiten Spal
 | `BoardFixtures.parse("XOX------")` | Board aus der kompakten Notation |
 | [`ScriptedPlayer`](src/test/java/ch/bbw/m450/tictactoe/ScriptedPlayer.java) | Spieler, der eine fest vorgegebene Zugfolge abspielt – damit lässt sich `play(...)` in eine exakt bekannte Spielsituation steuern |
 
-## 5. Link zum Test-Code auf GitHub
+## 5. Code Coverage mit JaCoCo
+
+### Einbindung in Gradle
+
+In [`build.gradle`](build.gradle) genügt das mitgelieferte `jacoco`-Plugin:
+
+```groovy
+plugins {
+	id 'java'
+	id 'jacoco'
+}
+
+jacoco {
+	toolVersion = '0.8.14'   // erste Version mit Java-25-Unterstützung
+}
+
+test {
+	useJUnitPlatform()
+	// jeder Testlauf erzeugt direkt im Anschluss den Coverage-Report
+	finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+	dependsOn test
+	reports {
+		html.required = true   // build/reports/jacoco/test/html/index.html
+		xml.required = true    // maschinenlesbar, z. B. für Coverage-Dienste
+		csv.required = false
+	}
+}
+```
+
+Wegen `finalizedBy` reicht ein einziger Befehl – der Report entsteht automatisch mit:
+
+```bash
+./gradlew test            # oder ./gradlew build
+```
+
+Der HTML-Report liegt danach unter `build/reports/jacoco/test/html/index.html`,
+der XML-Report unter `build/reports/jacoco/test/jacocoTestReport.xml`.
+
+### Aktuelles Ergebnis
+
+| Metrik | Abgedeckt | Total | Anteil |
+| --- | ---: | ---: | ---: |
+| Instruction | 328 | 375 | 87.5 % |
+| Branch | 72 | 78 | 92.3 % |
+| Line | 35 | 45 | 77.8 % |
+| Complexity | 40 | 50 | 80.0 % |
+| Method | 7 | 11 | 63.6 % |
+| Class | 3 | 4 | 75.0 % |
+
+Pro Klasse (Instructions):
+
+| Klasse | Coverage | Bemerkung |
+| --- | ---: | --- |
+| `TicTacToePlayer` (inkl. `Stone`) | 100.0 % | vollständig durch die Tests abgedeckt |
+| `TicTacToeMain` | 92.9 % | `isWin` und `play` sind komplett abgedeckt; offen bleibt v. a. `main(...)` |
+| `GreedyPlayer` | 76.2 % | der Fehlerfall "cannot play at all" wird nie erreicht |
+| `HumanPlayer` | 0.0 % | liest von `System.in` und ist ohne Refactoring nicht automatisiert testbar |
+
+Die 92.3 % Branch-Coverage sind der wichtigste Wert: `isWin` besteht fast nur aus
+Verzweigungen, und die Parameterized Tests durchlaufen alle 8 Gewinnlinien.
+
+## 6. GitHub-Actions-Pipeline
+
+Die Pipeline in [`.github/workflows/main.yml`](.github/workflows/main.yml) läuft bei jedem
+Push auf `main` und bei jedem Pull Request. Sie führt die vier geforderten Schritte aus:
+
+| Schritt | Befehl / Action | Zweck |
+| --- | --- | --- |
+| Build and test | `./gradlew build` | führt die automatisierten Tests aus |
+| Generate JaCoCo coverage report | `./gradlew jacocoTestReport` | ermittelt die Coverage und erzeugt den HTML- und XML-Report |
+| Coverage summary | `python3` + `$GITHUB_STEP_SUMMARY` | schreibt die Coverage-Tabelle direkt in die Job-Übersicht |
+| Upload JaCoCo coverage report | `actions/upload-artifact@v4` | speichert den **vollständigen** Report als Artifact `jacoco-coverage-report` |
+
+```yaml
+      - name: Build and test
+        run: sh ./gradlew build --no-daemon
+
+      - name: Generate JaCoCo coverage report
+        run: sh ./gradlew jacocoTestReport --no-daemon
+
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: build/reports/jacoco/test/
+          if-no-files-found: error
+          retention-days: 30
+```
+
+Details:
+
+* `path: build/reports/jacoco/test/` lädt das **ganze** Verzeichnis hoch – also alle 34
+  HTML-Dateien inklusive `jacoco-resources/` (CSS, Icons) sowie den XML-Report. Nur so ist
+  der heruntergeladene Report im Browser vollständig benutzbar.
+* `if: always()` sorgt dafür, dass der Report auch dann hochgeladen wird, wenn ein Test
+  fehlschlägt – gerade dann will man ja hineinschauen.
+* `if-no-files-found: error` lässt den Job scheitern, falls gar kein Report entsteht.
+* Zusätzlich wird der JUnit-Report als Artifact `junit-test-report` gesichert.
+
+Der Report wird nach dem Lauf unter **Actions → Workflow-Run → Artifacts →
+`jacoco-coverage-report`** heruntergeladen; nach dem Entpacken `html/index.html` öffnen.
+
+## 7. Link zum Test-Code auf GitHub
 
 Repository: <https://github.com/Crisissupercool/TicTacTestAssignment>
 
@@ -206,9 +313,10 @@ Repository: <https://github.com/Crisissupercool/TicTacTestAssignment>
 | Helper / Fixtures | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/BoardFixtures.java> |
 | Scripted-Player (Helper) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/ScriptedPlayer.java> |
 | Dummy-Tests (JUnit + AssertJ) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/DummyTest.java> |
-| Build-Konfiguration | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/build.gradle> |
+| Build-Konfiguration (inkl. JaCoCo) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/build.gradle> |
+| GitHub-Actions-Pipeline | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/.github/workflows/main.yml> |
 
-## 6. Screenshot: alle Tests erfolgreich
+## 8. Screenshot: alle Tests erfolgreich
 
 ![Alle Tests erfolgreich](docs/screenshot-tests.png)
 

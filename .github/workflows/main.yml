@@ -20,5 +20,53 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # runs the automated tests; `test` is finalizedBy `jacocoTestReport`,
+      # so the coverage data is collected during this run
       - name: Build and test
         run: sh ./gradlew build --no-daemon
+
+      # explicit second call: makes the report step visible in the pipeline
+      # (and is a no-op/up-to-date when the build above already produced it)
+      - name: Generate JaCoCo coverage report
+        run: sh ./gradlew jacocoTestReport --no-daemon
+
+      # reads the totals out of the XML report and shows them in the job summary,
+      # so the coverage is visible without downloading the artifact
+      - name: Coverage summary
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("build/reports/jacoco/test/jacocoTestReport.xml").getroot()
+          print("## JaCoCo Coverage\n")
+          print("| Metrik | Abgedeckt | Total | Anteil |")
+          print("| --- | ---: | ---: | ---: |")
+          for counter in root.findall("counter"):
+              missed = int(counter.get("missed"))
+              covered = int(counter.get("covered"))
+              total = missed + covered
+              share = f"{100.0 * covered / total:.1f} %" if total else "-"
+              print(f"| {counter.get('type').title()} | {covered} | {total} | {share} |")
+          EOF
+
+      # the complete HTML report (plus the XML) as a downloadable artifact
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: build/reports/jacoco/test/
+          if-no-files-found: error
+          retention-days: 30
+
+      # the JUnit report of the test run itself
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-test-report
+          path: build/reports/tests/test/
+          if-no-files-found: warn
+          retention-days: 30
