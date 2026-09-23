@@ -41,6 +41,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git fetch origin main && git switch -c "chore/devcontainer-$VERSION" origin/main
+          # beim Bootstrap kennt main die Datei noch nicht
+          if [ ! -f .devcontainer/devcontainer.json ]; then echo "main hat noch keinen DevContainer"; exit 0; fi
           sed -i -E "s|(-devcontainer:)[^\"]*|\1$VERSION|" .devcontainer/devcontainer.json
           if git diff --quiet; then echo "main ist bereits aktuell"; exit 0; fi
           git config user.name "github-actions[bot]"
