@@ -1,5 +1,7 @@
 .*
 !.git*
+# the DevContainer definition must be versioned - CI builds the image from it
+!.devcontainer/
 
 build/
 !**/src/main/**/build/

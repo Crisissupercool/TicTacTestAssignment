@@ -1,0 +1,14 @@
+{
+  "name": "TicTacToe Java 25",
+  "image": "ghcr.io/crisissupercool/tictactestassignment-devcontainer:1.0.0",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": false,
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack"
+      ]
+    }
+  },
+  "postCreateCommand": "./gradlew test --no-daemon"
+}

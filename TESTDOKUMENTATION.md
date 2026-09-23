@@ -199,8 +199,6 @@ Der erwartete Gewinner steht als `X`, `O` oder `-` (niemand) in der zweiten Spal
 
 ## 5. Code Coverage mit JaCoCo
 
-### Einbindung in Gradle
-
 In [`build.gradle`](build.gradle) genügt das mitgelieferte `jacoco`-Plugin:
 
 ```groovy
@@ -215,95 +213,131 @@ jacoco {
 
 test {
 	useJUnitPlatform()
-	// jeder Testlauf erzeugt direkt im Anschluss den Coverage-Report
-	finalizedBy jacocoTestReport
+	finalizedBy jacocoTestReport   // Report entsteht bei jedem Testlauf automatisch
 }
 
 jacocoTestReport {
 	dependsOn test
 	reports {
-		html.required = true   // build/reports/jacoco/test/html/index.html
-		xml.required = true    // maschinenlesbar, z. B. für Coverage-Dienste
-		csv.required = false
+		html.required = true
+		xml.required = true
 	}
 }
 ```
 
-Wegen `finalizedBy` reicht ein einziger Befehl – der Report entsteht automatisch mit:
+Wegen `finalizedBy` reicht `./gradlew test` bzw. `./gradlew build`. Der HTML-Report liegt
+danach unter `build/reports/jacoco/test/html/index.html`.
 
-```bash
-./gradlew test            # oder ./gradlew build
-```
-
-Der HTML-Report liegt danach unter `build/reports/jacoco/test/html/index.html`,
-der XML-Report unter `build/reports/jacoco/test/jacocoTestReport.xml`.
-
-### Aktuelles Ergebnis
-
-| Metrik | Abgedeckt | Total | Anteil |
-| --- | ---: | ---: | ---: |
-| Instruction | 328 | 375 | 87.5 % |
-| Branch | 72 | 78 | 92.3 % |
-| Line | 35 | 45 | 77.8 % |
-| Complexity | 40 | 50 | 80.0 % |
-| Method | 7 | 11 | 63.6 % |
-| Class | 3 | 4 | 75.0 % |
-
-Pro Klasse (Instructions):
+Aktuelles Ergebnis: **87.5 % Instruction**, 92.3 % Branch, 77.8 % Line.
 
 | Klasse | Coverage | Bemerkung |
 | --- | ---: | --- |
-| `TicTacToePlayer` (inkl. `Stone`) | 100.0 % | vollständig durch die Tests abgedeckt |
-| `TicTacToeMain` | 92.9 % | `isWin` und `play` sind komplett abgedeckt; offen bleibt v. a. `main(...)` |
+| `TicTacToePlayer` (inkl. `Stone`) | 100.0 % | vollständig abgedeckt |
+| `TicTacToeMain` | 92.9 % | `isWin` und `play` komplett; offen bleibt `main(...)` |
 | `GreedyPlayer` | 76.2 % | der Fehlerfall "cannot play at all" wird nie erreicht |
-| `HumanPlayer` | 0.0 % | liest von `System.in` und ist ohne Refactoring nicht automatisiert testbar |
-
-Die 92.3 % Branch-Coverage sind der wichtigste Wert: `isWin` besteht fast nur aus
-Verzweigungen, und die Parameterized Tests durchlaufen alle 8 Gewinnlinien.
+| `HumanPlayer` | 0.0 % | liest `System.in`, ohne Refactoring nicht testbar |
 
 ## 6. GitHub-Actions-Pipeline
 
-Die Pipeline in [`.github/workflows/main.yml`](.github/workflows/main.yml) läuft bei jedem
-Push auf `main` und bei jedem Pull Request. Sie führt die vier geforderten Schritte aus:
+[`.github/workflows/main.yml`](.github/workflows/main.yml) läuft bei jedem Push auf `main`
+und bei jedem Pull Request.
 
-| Schritt | Befehl / Action | Zweck |
-| --- | --- | --- |
-| Build and test | `./gradlew build` | führt die automatisierten Tests aus |
-| Generate JaCoCo coverage report | `./gradlew jacocoTestReport` | ermittelt die Coverage und erzeugt den HTML- und XML-Report |
-| Coverage summary | `python3` + `$GITHUB_STEP_SUMMARY` | schreibt die Coverage-Tabelle direkt in die Job-Übersicht |
-| Upload JaCoCo coverage report | `actions/upload-artifact@v4` | speichert den **vollständigen** Report als Artifact `jacoco-coverage-report` |
+| Job | Inhalt |
+| --- | --- |
+| `build` | führt die Tests im DevContainer aus, JaCoCo erzeugt den Report, dieser wird als Artifact `jacoco-coverage-report` gespeichert |
+| `coverage-pages` | nur auf `main`: schreibt die Coverage-Historie fort und veröffentlicht sie (Abschnitt 7) |
 
 ```yaml
       - name: Build and test
         run: sh ./gradlew build --no-daemon
 
-      - name: Generate JaCoCo coverage report
-        run: sh ./gradlew jacocoTestReport --no-daemon
-
-      - name: Upload JaCoCo coverage report
+      - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-coverage-report
           path: build/reports/jacoco/test/
           if-no-files-found: error
-          retention-days: 30
 ```
 
-Details:
+`path: build/reports/jacoco/test/` lädt das **ganze** Verzeichnis hoch, also alle HTML-Dateien
+inklusive `jacoco-resources/` (CSS, Icons) sowie den XML-Report – sonst wäre der
+heruntergeladene Report im Browser unbrauchbar. `if: always()` sichert den Report auch dann,
+wenn ein Test fehlschlägt.
 
-* `path: build/reports/jacoco/test/` lädt das **ganze** Verzeichnis hoch – also alle 34
-  HTML-Dateien inklusive `jacoco-resources/` (CSS, Icons) sowie den XML-Report. Nur so ist
-  der heruntergeladene Report im Browser vollständig benutzbar.
-* `if: always()` sorgt dafür, dass der Report auch dann hochgeladen wird, wenn ein Test
-  fehlschlägt – gerade dann will man ja hineinschauen.
-* `if-no-files-found: error` lässt den Job scheitern, falls gar kein Report entsteht.
-* Zusätzlich wird der JUnit-Report als Artifact `junit-test-report` gesichert.
+Der Build läuft im DevContainer-Image aus GHCR, siehe [DEVCONTAINER.md](DEVCONTAINER.md).
 
-Der Report wird nach dem Lauf unter **Actions → Workflow-Run → Artifacts →
-`jacoco-coverage-report`** heruntergeladen; nach dem Entpacken `html/index.html` öffnen.
+## 7. Coverage-Trend auf GitHub Pages
 
-## 7. Link zum Test-Code auf GitHub
+Erreichbar unter **<https://crisissupercool.github.io/TicTacTestAssignment/>**
+
+| Pfad | Inhalt |
+| --- | --- |
+| `/` | Trend-Diagramm und Tabelle der letzten Messwerte |
+| `/coverage/` | vollständiger JaCoCo-Report des letzten `main`-Builds |
+| `/coverage-history.csv` | die Rohdaten |
+
+### 7.1 Design-Entscheide
+
+| Frage | Entscheid |
+| --- | --- |
+| Woher kommt der Coverage-Wert? | Aus dem `<counter type="INSTRUCTION">` direkt unter `<report>` in `jacocoTestReport.xml` – das sind die Gesamtwerte |
+| Welche Metrik? | Instruction-Coverage, eine Zahl pro Messung |
+| Wo und in welchem Format? | `coverage-history.csv` auf dem Branch **`gh-pages`** – versioniert, aber ohne die `main`-Historie zu belasten |
+| Wie kommen neue Werte dazu? | Der Job klont `gh-pages`, hängt eine Zeile an und veröffentlicht alles neu. Ist der Commit schon vorhanden, wird er ersetzt – ein Re-Run erzeugt keinen doppelten Punkt |
+| Wie entsteht die Time-Series? | `scripts/coverage_history.py` rendert ein Inline-SVG in die HTML-Seite – kein JavaScript, kein CDN |
+| Wie wird veröffentlicht? | `peaceiris/actions-gh-pages@v4` publiziert das Verzeichnis `site/` |
+| Wann wird aktualisiert? | Nur bei Push auf `main` – die Zeitreihe soll den Zustand von `main` abbilden, nicht den von Feature-Branches |
+
+### 7.2 Architektur
+
+```
+  Push auf main
+       │
+       ▼
+  Job build ──────► Artifact: jacoco-coverage-report (html/ + XML)
+       │
+       ▼
+  Job coverage-pages
+       │
+       ├─ 1. Artifact herunterladen
+       ├─ 2. git clone gh-pages  ──►  coverage-history.csv (bisherige)
+       ├─ 3. coverage_history.py ──►  Zeile anhängen + index.html rendern
+       ├─ 4. JaCoCo-Report kopieren nach site/coverage/
+       └─ 5. peaceiris/actions-gh-pages ──► Branch gh-pages
+       │
+       ▼
+  https://crisissupercool.github.io/TicTacTestAssignment/
+```
+
+### 7.3 Datenformat
+
+```csv
+date,commit,coverage
+2026-09-01 08:00,1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,62.1
+2026-09-03 09:12,2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,68.4
+```
+
+Gespeichert wird die volle Commit-SHA, angezeigt nur die ersten 7 Zeichen.
+
+### 7.4 Lokal ausführen
+
+[`scripts/coverage_history.py`](scripts/coverage_history.py) braucht nur die
+Python-Standardbibliothek:
+
+```bash
+./gradlew test
+python3 scripts/coverage_history.py \
+  build/reports/jacoco/test/jacocoTestReport.xml \
+  site/coverage-history.csv site/index.html "$(git rev-parse HEAD)"
+```
+
+### 7.5 Einmalige Einstellung
+
+*Settings → Pages → Source* auf **Deploy from a branch**, Branch `gh-pages`, Ordner
+`/ (root)`. Den Branch legt die Action beim ersten Lauf selbst an.
+
+## 8. Link zum Test-Code auf GitHub
 
 Repository: <https://github.com/Crisissupercool/TicTacTestAssignment>
 
@@ -315,8 +349,10 @@ Repository: <https://github.com/Crisissupercool/TicTacTestAssignment>
 | Dummy-Tests (JUnit + AssertJ) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/src/test/java/ch/bbw/m450/tictactoe/DummyTest.java> |
 | Build-Konfiguration (inkl. JaCoCo) | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/build.gradle> |
 | GitHub-Actions-Pipeline | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/.github/workflows/main.yml> |
+| Coverage-Trend-Skript | <https://github.com/Crisissupercool/TicTacTestAssignment/blob/main/scripts/coverage_history.py> |
+| Coverage-Trend (GitHub Pages) | <https://crisissupercool.github.io/TicTacTestAssignment/> |
 
-## 8. Screenshot: alle Tests erfolgreich
+## 9. Screenshot: alle Tests erfolgreich
 
 ![Alle Tests erfolgreich](docs/screenshot-tests.png)
 

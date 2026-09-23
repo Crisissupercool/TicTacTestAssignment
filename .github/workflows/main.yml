@@ -5,81 +5,65 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   build:
+    # laeuft im DevContainer aus GHCR; `latest` zeigt immer auf die neueste
+    # freigegebene Version (unfreigegebene Images bekommen nie diesen Tag)
     runs-on: ubuntu-latest
-
-    # the GITHUB_TOKEN is read-only by default; pushing the gh-pages branch needs write
-    permissions:
-      contents: write
-
+    container:
+      image: ghcr.io/crisissupercool/tictactestassignment-devcontainer:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: 'temurin'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      # runs the automated tests; `test` is finalizedBy `jacocoTestReport`,
-      # so the coverage data is collected during this run
+      # `test` ist finalizedBy `jacocoTestReport` - der Report entsteht mit
       - name: Build and test
         run: sh ./gradlew build --no-daemon
 
-      # explicit second call: makes the report step visible in the pipeline
-      # (and is a no-op/up-to-date when the build above already produced it)
-      - name: Generate JaCoCo coverage report
-        run: sh ./gradlew jacocoTestReport --no-daemon
-
-      # reads the totals out of the XML report and shows them in the job summary,
-      # so the coverage is visible without downloading the artifact
-      - name: Coverage summary
-        if: always()
-        continue-on-error: true
-        run: |
-          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse("build/reports/jacoco/test/jacocoTestReport.xml").getroot()
-          print("## JaCoCo Coverage\n")
-          print("| Metrik | Abgedeckt | Total | Anteil |")
-          print("| --- | ---: | ---: | ---: |")
-          for counter in root.findall("counter"):
-              missed = int(counter.get("missed"))
-              covered = int(counter.get("covered"))
-              total = missed + covered
-              share = f"{100.0 * covered / total:.1f} %" if total else "-"
-              print(f"| {counter.get('type').title()} | {covered} | {total} | {share} |")
-          EOF
-
-      # the complete HTML report (plus the XML) as a downloadable artifact
-      - name: Upload JaCoCo coverage report
+      - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-coverage-report
           path: build/reports/jacoco/test/
           if-no-files-found: error
-          retention-days: 30
 
-      # the JUnit report of the test run itself
-      - name: Upload test report
-        if: always()
-        uses: actions/upload-artifact@v4
+  # Coverage-Trend: Messwert an die Historie auf gh-pages anhaengen und
+  # zusammen mit dem JaCoCo-Report veroeffentlichen. Nur bei Push auf main.
+  coverage-pages:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
         with:
-          name: junit-test-report
-          path: build/reports/tests/test/
-          if-no-files-found: warn
-          retention-days: 30
+          name: jacoco-coverage-report
+          path: report
 
-      # publishes the HTML coverage report on GitHub Pages (only on pushes to main)
-      - name: Deploy to GitHub Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Update history and build site
+        run: |
+          mkdir -p site
+          # bisherige Historie holen; beim ersten Lauf gibt es gh-pages noch nicht
+          if git clone --branch gh-pages --single-branch --depth 1 \
+               "https://github.com/${GITHUB_REPOSITORY}.git" published 2>/dev/null; then
+            cp published/coverage-history.csv site/ 2>/dev/null || true
+          fi
+          python3 scripts/coverage_history.py \
+            report/jacocoTestReport.xml site/coverage-history.csv site/index.html "$GITHUB_SHA"
+          cp -r report/html site/coverage
+
+      - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build/reports/jacoco/test/html
+          publish_dir: ./site
