@@ -238,4 +238,28 @@ class TicTacToeMainTest {
 		// THEN the game ends with the expected result (`null` means a draw)
 		assertThat(winner).isEqualTo(expectedWinner);
 	}
+
+	/**
+	 * @return scripted games in which a player makes an illegal move
+	 */
+	static Stream<Arguments> illegalMoves() {
+		return Stream.of(
+				Arguments.of(Named.of("CROSS plays below the board", new int[] {-1}), new int[] {}),
+				Arguments.of(Named.of("CROSS plays beyond the board", new int[] {9}), new int[] {}),
+				Arguments.of(Named.of("CIRCLE plays on an occupied field", new int[] {0}), new int[] {0}));
+	}
+
+	@ParameterizedTest(name = "GIVEN {0} WHEN the game is played THEN an IllegalStateException is thrown")
+	@MethodSource("illegalMoves")
+	@DisplayName("GIVEN a player making an illegal move WHEN the game is played THEN an IllegalStateException is thrown")
+	void GIVEN_illegalMove_WHEN_gameIsPlayed_THEN_throwsIllegalStateException(int[] xMoves, int[] oMoves) {
+		// GIVEN two players of which one plays an illegal position
+		var scriptedX = new ScriptedPlayer(xMoves);
+		var scriptedO = new ScriptedPlayer(oMoves);
+
+		// WHEN the game is played
+		// THEN the game refuses the move instead of corrupting the board
+		assertThatThrownBy(() -> play(scriptedX, scriptedO)).isInstanceOf(IllegalStateException.class)
+				.hasMessageStartingWith("cannot play to position");
+	}
 }
