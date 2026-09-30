@@ -11,11 +11,12 @@ permissions:
 
 jobs:
   build:
-    # laeuft im DevContainer aus GHCR; `latest` zeigt immer auf die neueste
-    # freigegebene Version (unfreigegebene Images bekommen nie diesen Tag)
+    # laeuft im DevContainer aus GHCR. Die Version ist fest verdrahtet, damit ein
+    # alter Commit reproduzierbar bleibt; der DevContainer-Workflow hebt sie per
+    # Pull Request automatisch an, sobald ein neues Image veroeffentlicht wurde.
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/crisissupercool/tictactestassignment-devcontainer:latest
+      image: ghcr.io/crisissupercool/tictactestassignment-devcontainer:1.0.0
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

@@ -1,11 +1,16 @@
-# Freigabe des DevContainer-Images. Laeuft NUR auf einem Git-Tag
-# `devcontainer-v<major>.<minor>.<patch>` - das Setzen des Tags ist die Freigabe.
-# Dadurch existieren in GHCR ausschliesslich freigegebene Images.
-name: DevContainer Release
+# Push auf main mit geaendertem Dockerfile -> neues Image nach GHCR, danach ein
+# Pull Request, der devcontainer.json und alle CI-Workflows auf die neue Version hebt.
+#
+# Der Filter auf `.devcontainer/Dockerfile` ist wichtig: der Bump-PR aendert nur
+# devcontainer.json und Workflows. Ohne den Filter wuerde sein Merge diesen Workflow
+# erneut ausloesen - eine Endlosschleife aus Image-Builds und PRs.
+name: DevContainer
 
 on:
   push:
-    tags: ['devcontainer-v*']
+    branches: [main]
+    paths: ['.devcontainer/Dockerfile']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,13 +18,26 @@ permissions:
   pull-requests: write
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # die Tag-Historie wird fuer die Versionsnummer gebraucht
 
-      - name: Version aus dem Tag lesen
-        run: echo "VERSION=${GITHUB_REF_NAME#devcontainer-v}" >> "$GITHUB_ENV"
+      # Patch-Version des letzten Releases hochzaehlen; MAJOR/MINOR setzt man
+      # von Hand, indem man vorher einen Tag `devcontainer-v2.0.0` anlegt.
+      - name: Naechste Version bestimmen
+        run: |
+          LAST=$(git tag -l 'devcontainer-v*' | sort -V | tail -1)
+          if [ -z "$LAST" ]; then
+            VERSION=1.0.0
+          else
+            VERSION=$(echo "${LAST#devcontainer-v}" | awk -F. '{print $1"."$2"."$3+1}')
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-devcontainer" >> "$GITHUB_ENV"
+          echo "Neue Version: $VERSION (vorher: ${LAST:-keine})"
 
       - uses: docker/login-action@v3
         with:
@@ -29,25 +47,29 @@ jobs:
 
       - name: Image bauen und pushen
         run: |
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}-devcontainer"
           docker build -f .devcontainer/Dockerfile -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
           docker push "$IMAGE:$VERSION"
           docker push "$IMAGE:latest"
 
-      # Bump-PR: hebt die Version in devcontainer.json an, damit lokale
-      # Umgebungen nach dem Merge automatisch das neue Image verwenden
+      # der Git-Tag dokumentiert, welcher Commit zu welcher Image-Version gehoert
+      - name: Version taggen
+        run: |
+          git tag "devcontainer-v$VERSION"
+          git push origin "devcontainer-v$VERSION"
+
       - name: Pull Request mit der neuen Version erstellen
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch origin main && git switch -c "chore/devcontainer-$VERSION" origin/main
-          # beim Bootstrap kennt main die Datei noch nicht
-          if [ ! -f .devcontainer/devcontainer.json ]; then echo "main hat noch keinen DevContainer"; exit 0; fi
-          sed -i -E "s|(-devcontainer:)[^\"]*|\1$VERSION|" .devcontainer/devcontainer.json
-          if git diff --quiet; then echo "main ist bereits aktuell"; exit 0; fi
+          git switch -c "devcontainer-$VERSION"
+          # hebt jede Referenz auf das Image an - in devcontainer.json und in allen Workflows
+          sed -i -E "s|(ghcr\.io/[^\"[:space:]]*-devcontainer:)[^\"[:space:]]*|\1$VERSION|" \
+            .devcontainer/devcontainer.json .github/workflows/*.yml
+          if git diff --quiet; then echo "alle Referenzen sind bereits aktuell"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "chore(devcontainer): Image $VERSION verwenden"
-          git push --force -u origin "chore/devcontainer-$VERSION"
-          gh pr create --base main --title "DevContainer $VERSION verwenden" \
-            --body "Automatisch erstellt nach dem Push von \`$VERSION\` nach GHCR."
+          git push --force -u origin "devcontainer-$VERSION"
+          gh pr create --base main \
+            --title "DevContainer $VERSION verwenden" \
+            --body "Automatisch erstellt, nachdem \`$IMAGE:$VERSION\` nach GHCR gepusht wurde. Aktualisiert \`devcontainer.json\` und alle CI-Workflows."
