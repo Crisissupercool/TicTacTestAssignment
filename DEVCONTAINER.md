@@ -2,10 +2,34 @@
 
 Image: `ghcr.io/crisissupercool/tictactestassignment-devcontainer` (GitHub Container Registry)
 
+## Der DevContainer
+
+[`.devcontainer/Dockerfile`](.devcontainer/Dockerfile) basiert auf `eclipse-temurin:25-jdk-alpine`
+und enthält Java 25, Gradle 9.7.0 sowie einen Benutzer `vscode` mit **UID:GID 1000:1000**.
+JUnit kommt über die Gradle-Abhängigkeiten. [`devcontainer.json`](.devcontainer/devcontainer.json)
+aktiviert das Java Extension Pack und die Gradle-Extension für VS Code.
+
+## Ablauf
+
+```
+Push auf main mit geändertem .devcontainer/Dockerfile
+        │
+        ▼
+  Workflow "DevContainer"
+        ├─ nächste Version bestimmen  (letzter Tag + 1 Patch)
+        ├─ Image bauen, als :X.Y.Z und :latest nach GHCR pushen
+        ├─ Git-Tag devcontainer-vX.Y.Z setzen
+        └─ Pull Request erstellen, der devcontainer.json und
+           alle CI-Workflows auf :X.Y.Z hebt
+        │
+        ▼
+  PR mergen → CI und lokale Umgebungen nutzen das neue Image
+```
+
 ## Versionierungs-Konzept
 
-Das Image folgt **SemVer** (`MAJOR.MINOR.PATCH`). Leitfrage: *Muss das Projekt angepasst
-werden, damit es im neuen Container noch baut?*
+**SemVer** (`MAJOR.MINOR.PATCH`). Leitfrage: *Muss das Projekt angepasst werden, damit es im
+neuen Container noch baut?*
 
 | Stelle | Wann | Beispiel |
 | --- | --- | --- |
@@ -13,22 +37,21 @@ werden, damit es im neuen Container noch baut?*
 | MINOR | neue Funktionalität, kompatibel | Gradle-Update, zusätzliches Tool |
 | PATCH | keine funktionale Änderung | Rebuild wegen Sicherheitsupdates |
 
-## Freigabeprozess
-
-Eine Freigabe ist das Setzen eines Git-Tags:
+Die **Patch-Stelle zählt der Workflow automatisch hoch**, ausgehend vom höchsten
+vorhandenen Tag `devcontainer-v*`. Ein MAJOR- oder MINOR-Sprung wird gesetzt, indem man
+vor dem Push von Hand einen Tag anlegt:
 
 ```bash
-git tag devcontainer-v1.1.0
-git push origin devcontainer-v1.1.0
+git tag devcontainer-v2.0.0 && git push origin devcontainer-v2.0.0
 ```
 
-Das löst [`devcontainer.yml`](.github/workflows/devcontainer.yml) aus. Der Workflow baut das
-Image, pusht es als `1.1.0` und `latest` nach GHCR und öffnet anschliessend automatisch
-einen Pull Request, der die Version in `.devcontainer/devcontainer.json` anhebt.
+Der nächste automatische Build macht daraus `2.0.1`.
 
-**Wie unfreigegebene Container verhindert werden:** Der Workflow reagiert ausschliesslich
-auf `push: tags: ['devcontainer-v*']`. Ein Push auf einen Branch baut und pusht gar nichts.
-In GHCR existieren dadurch nur Images, für die jemand bewusst einen Tag gesetzt hat.
+**Wie unfreigegebene Container verhindert werden:** Gebaut und gepusht wird ausschliesslich
+aus `main`. Feature-Branches und Pull Requests erzeugen kein Image. In GHCR liegt damit nur,
+was den Review nach `main` überstanden hat. Zusätzlich referenzieren CI und
+`devcontainer.json` eine **feste Version**, nie `latest` – ein neues Image wird also erst
+verwendet, wenn der Bump-PR gemergt ist.
 
 ## Verwendung
 
@@ -36,33 +59,21 @@ In GHCR existieren dadurch nur Images, für die jemand bewusst einen Tag gesetzt
 
 ```yaml
     container:
-      image: ghcr.io/crisissupercool/tictactestassignment-devcontainer:latest
+      image: ghcr.io/crisissupercool/tictactestassignment-devcontainer:1.0.0
 ```
 
-`latest` zeigt immer auf die neueste freigegebene Version, also nutzt die CI sie automatisch.
-JDK und Gradle kommen aus dem Image, `setup-java` und `setup-gradle` entfallen.
+JDK und Gradle kommen aus dem Image, `setup-java` und `setup-gradle` entfallen. Die Version
+hält der Bump-PR aktuell.
 
-**Lokal** – `.devcontainer/devcontainer.json` referenziert eine feste Version, die der
-Bump-PR aktuell hält:
+**Lokal** – in VS Code *Dev Containers: Reopen in Container*. Nach einem `git pull` mit
+neuer Version *Rebuild Container*; VS Code lädt das neue Image dann selbst.
 
-```json
-"image": "ghcr.io/crisissupercool/tictactestassignment-devcontainer:1.0.0"
-```
+## Warum der Path-Filter
 
-In VS Code *Dev Containers: Reopen in Container*. Nach einem `git pull` mit neuer Version
-*Rebuild Container* – VS Code lädt das neue Image dann selbst.
-
-## Erstinbetriebnahme
-
-`devcontainer.json` zeigt auf ein Image, das es in GHCR noch nicht gibt. Die erste Freigabe
-muss darum von Hand angestossen werden:
-
-```bash
-git tag devcontainer-v1.0.0 && git push origin devcontainer-v1.0.0
-```
-
-Danach unter *Packages → Package settings* die Sichtbarkeit auf **Public** stellen (oder das
-Repo mit Leserecht verknüpfen), sonst kann die CI das Image nicht ziehen.
+Der Workflow reagiert nur auf Änderungen an `.devcontainer/Dockerfile`. Das ist nicht
+kosmetisch: Der Bump-PR ändert `devcontainer.json` und die Workflows. Würde der Workflow
+auch darauf reagieren, löste sein Merge sofort den nächsten Build samt nächstem PR aus –
+eine Endlosschleife.
 
 ## Anpassung am Projekt
 
