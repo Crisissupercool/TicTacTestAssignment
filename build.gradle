@@ -3,9 +3,21 @@ plugins {
 	id 'jacoco'
 }
 
+// the release workflow passes the version of the git tag: ./gradlew build -PreleaseVersion=1.2.0
+version = findProperty('releaseVersion') ?: '0.0.0-dev'
+
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+// runnable jar: java -jar build/libs/tictactest-<version>.jar
+jar {
+	archiveBaseName = 'tictactest'
+	manifest {
+		attributes 'Main-Class': 'ch.bbw.m450.tictactoe.TicTacToeMain',
+				'Implementation-Version': project.version
 	}
 }
 

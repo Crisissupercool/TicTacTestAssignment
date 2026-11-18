@@ -1,0 +1,34 @@
+#!/bin/bash
+# Erste Einrichtung der Instanz (cloud-init, laeuft nur beim ersten Start).
+set -euxo pipefail
+
+dnf install -y java-25-amazon-corretto-headless nginx
+
+useradd --system --home-dir /opt/tictactest --shell /sbin/nologin tictactest
+install -d /opt/tictactest /etc/tictactest
+echo "${github_repo}" > /etc/tictactest/repo
+
+# ttyd: nicht im Amazon-Repository, daher feste Version mit Pruefsumme
+curl -fsSL -o /usr/local/bin/ttyd "https://github.com/tsl0922/ttyd/releases/download/${ttyd_version}/ttyd.x86_64"
+echo "${ttyd_sha256}  /usr/local/bin/ttyd" | sha256sum -c -
+chmod 755 /usr/local/bin/ttyd
+
+cat > /usr/local/bin/tictactest-deploy <<'EOF_DEPLOY'
+${deploy_script}
+EOF_DEPLOY
+chmod 755 /usr/local/bin/tictactest-deploy
+
+cat > /etc/systemd/system/tictactest-console.service <<'EOF_UNIT'
+${console_unit}
+EOF_UNIT
+
+cat > /etc/nginx/nginx.conf <<'EOF_NGINX'
+${nginx_conf}
+EOF_NGINX
+
+echo none > /usr/share/nginx/html/version.txt
+
+systemctl daemon-reload
+# beim Booten starten; der Konsolen-Dienst startet erst, wenn ein Jar deployt wurde
+systemctl enable --now nginx
+systemctl enable tictactest-console

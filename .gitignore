@@ -3,6 +3,12 @@
 # the DevContainer definition must be versioned - CI builds the image from it
 !.devcontainer/
 
+# OpenTofu: State und Provider-Cache bleiben lokal (enthalten Ressourcendetails), das Lock-File gehoert ins Repo
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+!infra/.terraform.lock.hcl
+
 build/
 !**/src/main/**/build/
 !**/src/test/**/build/

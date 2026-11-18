@@ -1,0 +1,157 @@
+# Deployment der Release-Artefakte (kein Neubau, keine Infrastruktur-Aenderung).
+#   - automatisch: nachdem der Workflow "Release" erfolgreich war (nur Tags, nie ein Push auf main)
+#   - manuell:     Version eingeben, Backend und Frontend dieser Version werden deployt (Rollback)
+# Zugangsdaten: docs/deployment.md, Abschnitt "Secrets-Konzept".
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Zu deployende Version, z. B. 1.2.0'
+        required: true
+
+# nie zwei Deployments gleichzeitig; ein zweites wartet, bis das erste fertig ist
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      backend: ${{ steps.detect.outputs.backend }}
+      frontend: ${{ steps.detect.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # alle Tags werden gebraucht, um den vorherigen Release zu finden
+
+      - id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          version="${INPUT_VERSION:-$RUN_TAG}"
+          version="${version#v}"
+          # Eingabe pruefen: geht spaeter in einen Shell-Befehl auf der Instanz
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Ungueltige Version '$version' (erwartet: 1.2.3)"; exit 1
+          fi
+          tag="v$version"
+          git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "::error::Tag $tag existiert nicht"; exit 1; }
+
+          backend=false; frontend=false
+          if [ "$EVENT" = workflow_dispatch ]; then
+            backend=true; frontend=true            # gezieltes Deployment: immer beides
+          else
+            # Vergleich mit dem vorherigen Release-Tag, nicht mit dem letzten Commit
+            prev=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)
+            if [ -z "$prev" ]; then
+              echo "Erster Release, es gibt keinen Vorgaenger"
+              backend=true; frontend=true
+            else
+              files=$(git diff --name-only "$prev" "$tag")
+              echo "Aenderungen $prev..$tag:"; echo "$files"
+              # Backend = alles, was das Jar veraendert (inkl. Build-Dateien)
+              grep -Eq '^(src/main/|build\.gradle$|settings\.gradle$|gradle\.properties$|gradle/|gradlew)' <<< "$files" && backend=true
+              grep -q '^frontend/' <<< "$files" && frontend=true
+            fi
+          fi
+          {
+            echo "version=$version"; echo "backend=$backend"; echo "frontend=$frontend"
+          } >> "$GITHUB_OUTPUT"
+          echo "Deploy $tag: backend=$backend, frontend=$frontend" >> "$GITHUB_STEP_SUMMARY"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+      INSTANCE_ID: ${{ vars.INSTANCE_ID }}
+      VERSION_URL: ${{ vars.VERSION_URL }}
+    steps:
+      - name: AWS-Zugang pruefen
+        run: |
+          if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "::error::AWS-Credentials fehlen oder sind abgelaufen. Secrets erneuern und diesen Workflow mit Version $VERSION manuell starten."
+            exit 1
+          fi
+
+      # Jar von der Instanz selbst aus dem GitHub-Release laden und den Dienst neu starten
+      - name: Jar deployen (SSM)
+        run: |
+          id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+                 --document-name AWS-RunShellScript \
+                 --parameters "commands=[\"/usr/local/bin/tictactest-deploy $VERSION\"]" \
+                 --query Command.CommandId --output text)
+          if ! aws ssm wait command-executed --command-id "$id" --instance-id "$INSTANCE_ID"; then
+            aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" \
+              --query '[StandardOutputContent,StandardErrorContent]' --output text
+            exit 1
+          fi
+
+      - name: Laufende Version pruefen
+        run: |
+          for i in $(seq 1 24); do
+            running=$(curl -fsS --max-time 5 "$VERSION_URL" || true)
+            [ "$running" = "$VERSION" ] && { echo "Backend laeuft in Version $running"; exit 0; }
+            echo "Versuch $i: Instanz meldet '${running:-keine Antwort}', erwartet $VERSION"; sleep 5
+          done
+          echo "::error::Die Instanz meldet nicht die Version $VERSION"; exit 1
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+      S3_BUCKET: ${{ vars.S3_BUCKET }}
+      PLAY_URL: ${{ vars.PLAY_URL }}
+    steps:
+      - name: AWS-Zugang pruefen
+        run: |
+          if ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "::error::AWS-Credentials fehlen oder sind abgelaufen. Secrets erneuern und diesen Workflow mit Version $VERSION manuell starten."
+            exit 1
+          fi
+
+      - name: Frontend-Archiv aus dem Release holen
+        run: |
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern 'tictactest-frontend-*.zip' --dir dl
+          unzip -q dl/tictactest-frontend-*.zip -d site
+
+      # --delete entfernt verschwundene Dateien; config.js (von OpenTofu) bleibt wegen --exclude unberuehrt
+      - name: In den Bucket synchronisieren
+        run: aws s3 sync site "s3://$S3_BUCKET" --delete --exclude config.js
+
+      - name: Ausgeliefertes Frontend pruefen
+        run: |
+          for i in $(seq 1 12); do
+            served=$(curl -fsS --max-time 5 "$PLAY_URL/version.txt" || true)
+            if [ "$served" = "$VERSION" ]; then
+              curl -fsS --max-time 5 -o /dev/null "$PLAY_URL/config.js"   # Konfiguration noch vorhanden?
+              echo "Frontend liefert Version $served"; exit 0
+            fi
+            echo "Versuch $i: Frontend meldet '${served:-keine Antwort}', erwartet $VERSION"; sleep 5
+          done
+          echo "::error::Das Frontend liefert nicht die Version $VERSION"; exit 1

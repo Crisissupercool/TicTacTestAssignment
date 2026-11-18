@@ -1,0 +1,66 @@
+# Tag v* -> GitHub-Release mit Jar und Frontend-Archiv.
+# Das Deployment (deploy.yml) startet erst, wenn dieser Workflow erfolgreich war.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/crisissupercool/tictactestassignment-devcontainer:1.0.0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version aus dem Tag ableiten
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Jar bauen und testen
+        run: sh ./gradlew build --no-daemon -PreleaseVersion="$VERSION"
+
+      # config.js gehoert zur Umgebung (lokal / OpenTofu) und ist bewusst nicht im Archiv
+      - name: Frontend-Archiv erstellen
+        run: |
+          mkdir stage
+          cp -r frontend/. stage/
+          rm stage/config.js
+          echo "$VERSION" > stage/version.txt
+          cd stage
+          python3 -m zipfile -c "../tictactest-frontend-$VERSION.zip" *
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            build/libs/tictactest-*.jar
+            tictactest-frontend-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+
+      - name: GitHub-Release erstellen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # die Dateien liegen je nach Artifact-Struktur in Unterordnern
+          find assets -type f \( -name '*.jar' -o -name '*.zip' \) -print0 \
+            | xargs -0 gh release create "$GITHUB_REF_NAME" \
+                --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

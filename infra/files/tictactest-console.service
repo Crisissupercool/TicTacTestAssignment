@@ -1,0 +1,22 @@
+[Unit]
+Description=TicTacTest Web-Konsole (ttyd)
+After=network.target
+# bis zum ersten Deployment gibt es kein Jar
+ConditionPathExists=/opt/tictactest/current.jar
+
+[Service]
+User=tictactest
+# -W   Eingaben aus dem Browser zulassen (sonst nur lesen)
+# -i lo nur auf localhost lauschen, von aussen erreichbar nur ueber nginx
+# -m 5 hoechstens 5 gleichzeitige Verbindungen = 5 JVMs (kleiner Speicher)
+# Es wird ausschliesslich das Jar gestartet, keine Shell. Kein -a: URL-Parameter duerfen den Befehl nicht erweitern.
+ExecStart=/usr/local/bin/ttyd -W -i lo -p 7681 -m 5 /usr/bin/java -Xmx64m -jar /opt/tictactest/current.jar
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
