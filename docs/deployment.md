@@ -19,7 +19,7 @@
 | Datei | Inhalt |
 | --- | --- |
 | `versions.tf`, `variables.tf` | Provider, Region, Instanztyp, ttyd-Version und -Prüfsumme |
-| `main.tf` | Instanz (`LabInstanceProfile` über `data`), Security Group, Elastic IP, S3-Bucket mit Website, `config.js` |
+| `main.tf` | Instanz (`LabInstanceProfile` über `data`), Security Group, Elastic IP, S3-Bucket mit Website (als CloudFormation-Stack, siehe unten), `config.js` |
 | `outputs.tf` | Adressen und IDs |
 | `user_data.sh.tftpl`, `files/` | Einrichtung beim ersten Start: Corretto 25, nginx, ttyd (fest + SHA-256), systemd-Unit, `tictactest-deploy` |
 
@@ -60,6 +60,8 @@ Darum steht die Version nicht in `user_data`. Wir setzen `user_data_replace_on_c
 Der Port 7681 von ttyd ist bewusst **nicht** offen: ttyd lauscht nur auf localhost, nginx ist der einzige Eingang.
 
 ## Frontend und Konfiguration
+
+**Bucket über CloudFormation statt `aws_s3_bucket`.** Der AWS-Provider liest nach dem Erstellen eines Buckets dessen Object-Lock-Konfiguration. Die Service Control Policy dieses Learner Labs verbietet `s3:GetBucketObjectLockConfiguration` ausdrücklich, `tofu apply` brach deshalb mit `AccessDenied` ab (die geprüften Provider-Versionen 5.x und 6.x behandeln diesen Fehler in der AWS-Partition als fatal, ein Versionswechsel hilft also nicht). Ein `aws_cloudformation_stack` legt denselben Bucket (Website, Public-Access-Block, Policy) an, ohne diese Einstellung zu lesen. Folge: CloudFormation löscht keinen gefüllten Bucket, deshalb leert ein `local-exec` beim `tofu destroy` ihn zuerst (`aws s3 rm`, braucht die AWS CLI). Der Bucket-Name wird von CloudFormation vergeben und ist weltweit eindeutig.
 
 OpenTofu schreibt `config.js` mit der Adresse der Elastic IP in den Bucket (`aws_s3_object.config`). Das Deployment:
 
@@ -228,5 +230,6 @@ Tag v1.4.0 ─► dev (automatisch) ─► Integrationstest ─► staging (auto
 
 - Die Pipeline und die Infrastruktur sind bisher nicht gegen ein echtes AWS-Konto getestet. Die Änderungserkennung und der Probestart wurden lokal geprüft.
 - Das Repository muss öffentlich bleiben (Jar-Download ohne Zugangsdaten).
-- Der Bucket ist öffentlich lesbar. Verbietet das Konto öffentliche Buckets (Block Public Access auf Kontoebene), scheitert `tofu apply` an der Bucket-Policy.
+- Der Bucket ist öffentlich lesbar. Verbietet das Konto öffentliche Buckets (Block Public Access auf Kontoebene), scheitert der Stack an der Bucket-Policy.
+- `tofu destroy` braucht die AWS CLI, um den Bucket zu leeren. Fehlt sie, schlägt das Löschen des Stacks fehl; der Bucket ist dann von Hand zu leeren (`aws s3 rm s3://<Bucket> --recursive`).
 - Kein HTTPS: Der S3-Websitebetrieb bietet es nicht, und eine HTTPS-Seite dürfte kein `ws://` einbetten.
