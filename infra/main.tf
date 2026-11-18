@@ -91,47 +91,72 @@ resource "aws_eip" "console" {
 # Frontend: statische Webseite im S3-Bucket
 ############################################################
 
-resource "aws_s3_bucket" "frontend" {
-  bucket_prefix = "tictactest-frontend-" # Bucket-Namen sind weltweit eindeutig
-  force_destroy = true                   # tofu destroy darf auch einen gefuellten Bucket loeschen
-}
+# Der Bucket wird ueber einen CloudFormation-Stack angelegt statt mit aws_s3_bucket: Der
+# AWS-Provider liest nach dem Erstellen die Object-Lock-Konfiguration, und die
+# Service Control Policy des Learner Labs verbietet s3:GetBucketObjectLockConfiguration.
+# CloudFormation legt den Bucket an, ohne diese Einstellung zu lesen.
+resource "aws_cloudformation_stack" "frontend" {
+  name = "tictactest-frontend"
 
-resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  index_document {
-    suffix = "index.html"
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  bucket                  = aws_s3_bucket.frontend.id
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_policy" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "PublicRead"
-      Effect    = "Allow"
-      Principal = "*"
-      Action    = "s3:GetObject"
-      Resource  = "${aws_s3_bucket.frontend.arn}/*"
-    }]
+  # kein BucketName: CloudFormation vergibt einen weltweit eindeutigen Namen
+  template_body = jsonencode({
+    Resources = {
+      Bucket = {
+        Type = "AWS::S3::Bucket"
+        Properties = {
+          WebsiteConfiguration = {
+            IndexDocument = "index.html"
+          }
+          PublicAccessBlockConfiguration = {
+            BlockPublicAcls       = false
+            BlockPublicPolicy     = false
+            IgnorePublicAcls      = false
+            RestrictPublicBuckets = false
+          }
+        }
+      }
+      Policy = {
+        Type = "AWS::S3::BucketPolicy"
+        Properties = {
+          Bucket = { Ref = "Bucket" }
+          PolicyDocument = {
+            Version = "2012-10-17"
+            Statement = [{
+              Effect    = "Allow"
+              Principal = "*"
+              Action    = "s3:GetObject"
+              Resource  = { "Fn::Join" = ["", [{ "Fn::GetAtt" = ["Bucket", "Arn"] }, "/*"]] }
+            }]
+          }
+        }
+      }
+    }
+    Outputs = {
+      BucketName = { Value = { Ref = "Bucket" } }
+      WebsiteURL = { Value = { "Fn::GetAtt" = ["Bucket", "WebsiteURL"] } }
+    }
   })
+}
 
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
+# CloudFormation loescht keinen gefuellten Bucket. Vor dem Loeschen des Stacks (tofu destroy)
+# wird er deshalb geleert. Benoetigt die AWS CLI; schlaegt es fehl, ist der Bucket von Hand zu leeren.
+resource "terraform_data" "empty_bucket_on_destroy" {
+  input = {
+    bucket = aws_cloudformation_stack.frontend.outputs["BucketName"]
+    region = var.region
+  }
+
+  provisioner "local-exec" {
+    when       = destroy
+    command    = "aws s3 rm s3://${self.input.bucket} --recursive --region ${self.input.region}"
+    on_failure = continue
+  }
 }
 
 # Nur die Infrastruktur kennt die Adresse der Instanz. Das Deployment ueberspringt diese
 # Datei (aws s3 sync --exclude config.js), das Release-Archiv enthaelt sie nicht.
 resource "aws_s3_object" "config" {
-  bucket       = aws_s3_bucket.frontend.id
+  bucket       = aws_cloudformation_stack.frontend.outputs["BucketName"]
   key          = "config.js"
   content_type = "application/javascript"
   content      = <<-EOT
